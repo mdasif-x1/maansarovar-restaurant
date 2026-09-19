@@ -1,0 +1,22 @@
+# Security & Environment Variables
+.env
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
+
+# Dependency directories
+node_modules/
+backend/target/
+frontend/dist/
+
+# Scratch & temporary scripts
+scratch/
+
+# IDE & OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
