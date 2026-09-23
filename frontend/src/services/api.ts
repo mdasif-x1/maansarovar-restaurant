@@ -17,7 +17,16 @@ export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): 
     headers,
   });
 
-  const json = await response.json();
+  const text = await response.text();
+  let json: any = {};
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch (err) {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+  }
+
 
   if (!response.ok || (json.success !== undefined && !json.success)) {
     const errorMsg = json.message || `HTTP ${response.status}: ${response.statusText}`;
@@ -26,3 +35,4 @@ export async function fetchApi<T>(endpoint: string, options: RequestInit = {}): 
 
   return json.data !== undefined ? json.data : json;
 }
+
