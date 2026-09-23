@@ -14,10 +14,12 @@ import { getSettings, updateSettingsAdmin } from '../services/settingsService';
 
 import {
   Shield, Utensils, Image as ImageIcon, Settings, CalendarCheck, LogOut,
-  Plus, Trash2, Edit2, CheckCircle, Clock, AlertCircle, RefreshCw, X, FolderPlus, Tag, FileText
+  Plus, Trash2, Edit2, CheckCircle, Clock, AlertCircle, RefreshCw, X, FolderPlus, Tag, FileText, Check, Loader2, Phone, MapPin, Globe, Share2, Megaphone, FileImage
 } from 'lucide-react';
 import { ImageUploader } from '../components/ImageUploader';
 import { checkImageReferencesAdmin, deleteImageAdmin } from '../services/uploadService';
+import { InlineConfirm } from '../components/InlineConfirm';
+import { Toast } from '../components/Toast';
 
 export const AdminDashboard: React.FC = () => {
   const { user, logout } = useAuth();
@@ -33,7 +35,17 @@ export const AdminDashboard: React.FC = () => {
   const [settings, setSettings] = useState<Record<string, string>>({});
 
   const [isLoading, setIsLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  // Settings Save State: 'idle' | 'saving' | 'saved' | 'error'
+  const [settingsSaveState, setSettingsSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  // Delete Confirmation State
+  const [activeDeleteConfirm, setActiveDeleteConfirm] = useState<{
+    type: 'reservation' | 'category' | 'menu' | 'gallery' | 'upload';
+    id: number | string;
+    title: string;
+  } | null>(null);
 
   // Menu Category Modal state
   const [showCategoryModal, setShowCategoryModal] = useState(false);
@@ -47,10 +59,11 @@ export const AdminDashboard: React.FC = () => {
 
   // Menu Item Modal state
   const [showMenuModal, setShowMenuModal] = useState(false);
-  const [editingMenuItem, setEditingMenuItem] = useState<Partial<MenuItem> & { categoryId?: number }>({
+  const [editingMenuItem, setEditingMenuItem] = useState<Partial<MenuItem> & { categoryId?: number; rawPrice?: string }>({
     name: '',
     description: '',
     price: 100,
+    rawPrice: '100',
     categoryId: 1,
     isVegetarian: true,
     isChefSpecial: false,
@@ -90,6 +103,7 @@ export const AdminDashboard: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Error loading admin data:', err);
+      setToast({ type: 'error', message: err.message || 'Failed to load administrative data' });
     } finally {
       setIsLoading(false);
     }
@@ -99,21 +113,21 @@ export const AdminDashboard: React.FC = () => {
   const handleUpdateReservationStatus = async (id: number, status: string) => {
     try {
       await updateReservationStatusAdmin(id, status);
-      setMessage({ type: 'success', text: `Reservation status updated to ${status}` });
+      setToast({ type: 'success', message: `Reservation status updated to ${status}` });
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to update reservation status' });
+      setToast({ type: 'error', message: err.message || 'Failed to update reservation status' });
     }
   };
 
-  const handleDeleteReservation = async (id: number) => {
-    if (!window.confirm('Delete this reservation entry?')) return;
+  const confirmDeleteReservation = async (id: number) => {
     try {
       await deleteReservationAdmin(id);
-      setMessage({ type: 'success', text: 'Reservation deleted' });
+      setToast({ type: 'success', message: 'Reservation entry deleted successfully' });
+      setActiveDeleteConfirm(null);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to delete' });
+      setToast({ type: 'error', message: err.message || 'Failed to delete reservation' });
     }
   };
 
@@ -130,7 +144,7 @@ export const AdminDashboard: React.FC = () => {
           displayOrder: editingCategory.displayOrder || 1,
           isActive: editingCategory.isActive !== false,
         });
-        setMessage({ type: 'success', text: 'Menu category updated successfully' });
+        setToast({ type: 'success', message: 'Menu category updated successfully' });
       } else {
         await createCategoryAdmin({
           name: editingCategory.name,
@@ -139,74 +153,71 @@ export const AdminDashboard: React.FC = () => {
           displayOrder: editingCategory.displayOrder || 1,
           isActive: true,
         });
-        setMessage({ type: 'success', text: 'New menu category created' });
+        setToast({ type: 'success', message: 'New menu category created' });
       }
       setShowCategoryModal(false);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Error saving menu category' });
+      setToast({ type: 'error', message: err.message || 'Error saving menu category' });
     }
   };
 
-  const handleDeleteCategory = async (id: number) => {
-    if (!window.confirm('Delete this menu category? Dishes in this category may be affected.')) return;
+  const confirmDeleteCategory = async (id: number) => {
     try {
       await deleteCategoryAdmin(id);
-      setMessage({ type: 'success', text: 'Category deleted' });
+      setToast({ type: 'success', message: 'Category deleted successfully' });
+      setActiveDeleteConfirm(null);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to delete category' });
+      setToast({ type: 'error', message: err.message || 'Failed to delete category' });
     }
   };
 
   // Menu item actions
   const handleSaveMenuItem = async (e: React.FormEvent) => {
     e.preventDefault();
+    const finalPrice = parseFloat(editingMenuItem.rawPrice || '0');
+    if (isNaN(finalPrice) || finalPrice <= 0) {
+      setToast({ type: 'error', message: 'Please enter a valid dish price (greater than ₹0).' });
+      return;
+    }
+
     try {
+      const payload = {
+        name: editingMenuItem.name,
+        description: editingMenuItem.description,
+        price: finalPrice,
+        categoryId: editingMenuItem.categoryId || categories[0]?.id || 1,
+        isVegetarian: editingMenuItem.isVegetarian,
+        isChefSpecial: editingMenuItem.isChefSpecial,
+        isAvailable: editingMenuItem.isAvailable,
+        imageUrl: editingMenuItem.imageUrl,
+        imageAltText: editingMenuItem.imageAltText,
+        imageSourceType: editingMenuItem.imageSourceType,
+      };
+
       if (editingMenuItem.id) {
-        await updateMenuItemAdmin(editingMenuItem.id, {
-          name: editingMenuItem.name,
-          description: editingMenuItem.description,
-          price: editingMenuItem.price,
-          categoryId: editingMenuItem.categoryId || categories[0]?.id || 1,
-          isVegetarian: editingMenuItem.isVegetarian,
-          isChefSpecial: editingMenuItem.isChefSpecial,
-          isAvailable: editingMenuItem.isAvailable,
-          imageUrl: editingMenuItem.imageUrl,
-          imageAltText: editingMenuItem.imageAltText,
-          imageSourceType: editingMenuItem.imageSourceType,
-        });
-        setMessage({ type: 'success', text: 'Menu item updated successfully' });
+        await updateMenuItemAdmin(editingMenuItem.id, payload);
+        setToast({ type: 'success', message: 'Menu item updated successfully' });
       } else {
-        await createMenuItemAdmin({
-          name: editingMenuItem.name,
-          description: editingMenuItem.description,
-          price: editingMenuItem.price,
-          categoryId: editingMenuItem.categoryId || categories[0]?.id || 1,
-          isVegetarian: editingMenuItem.isVegetarian,
-          isChefSpecial: editingMenuItem.isChefSpecial,
-          isAvailable: editingMenuItem.isAvailable,
-          imageUrl: editingMenuItem.imageUrl,
-          imageAltText: editingMenuItem.imageAltText,
-          imageSourceType: editingMenuItem.imageSourceType,
-        });
-        setMessage({ type: 'success', text: 'New menu item created' });
+        await createMenuItemAdmin(payload);
+        setToast({ type: 'success', message: 'New menu item created' });
       }
       setShowMenuModal(false);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Error saving menu item' });
+      setToast({ type: 'error', message: err.message || 'Error saving menu item' });
     }
   };
 
-  const handleDeleteMenuItem = async (id: number) => {
-    if (!window.confirm('Delete this menu item?')) return;
+  const confirmDeleteMenuItem = async (id: number) => {
     try {
       await deleteMenuItemAdmin(id);
-      setMessage({ type: 'success', text: 'Menu item deleted' });
+      setToast({ type: 'success', message: 'Menu item deleted successfully' });
+      setActiveDeleteConfirm(null);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to delete item' });
+      setToast({ type: 'error', message: err.message || 'Failed to delete item' });
     }
   };
 
@@ -215,34 +226,66 @@ export const AdminDashboard: React.FC = () => {
     e.preventDefault();
     try {
       await createGalleryImageAdmin(newGalleryImage);
-      setMessage({ type: 'success', text: 'Gallery image metadata added' });
+      setToast({ type: 'success', message: 'Gallery photo entry added' });
       setShowGalleryModal(false);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to add image' });
+      setToast({ type: 'error', message: err.message || 'Failed to add gallery photo' });
     }
   };
 
-  const handleDeleteGalleryImage = async (id: number) => {
-    if (!window.confirm('Delete this gallery image?')) return;
+  const confirmDeleteGalleryImage = async (id: number) => {
     try {
       await deleteGalleryImageAdmin(id);
-      setMessage({ type: 'success', text: 'Gallery image deleted' });
+      setToast({ type: 'success', message: 'Gallery image deleted successfully' });
+      setActiveDeleteConfirm(null);
       loadData();
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to delete gallery image' });
+      setToast({ type: 'error', message: err.message || 'Failed to delete gallery image' });
     }
   };
 
-  // Settings actions
+  // Upload actions
+  const confirmDeleteUploadFile = async (filename: string) => {
+    try {
+      const refs = await checkImageReferencesAdmin(filename);
+      if (refs.length > 0) {
+        setToast({
+          type: 'error',
+          message: `Cannot delete '${filename}'. It is in active use in:\n• ${refs.join('\n• ')}`,
+        });
+        setActiveDeleteConfirm(null);
+        return;
+      }
+      await deleteImageAdmin(filename);
+      setToast({ type: 'success', message: `Deleted ${filename} successfully` });
+      setActiveDeleteConfirm(null);
+      loadData();
+    } catch (err: any) {
+      setToast({ type: 'error', message: err.message || 'Failed to check or delete file' });
+    }
+  };
+
+  // Settings actions with local micro-interaction state
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (settingsSaveState === 'saving') return;
+
+    setSettingsSaveState('saving');
     try {
       await updateSettingsAdmin(settings);
       await refreshSettings();
-      setMessage({ type: 'success', text: 'Restaurant business content saved successfully and published live!' });
+      setSettingsSaveState('saved');
+      setToast({ type: 'success', message: 'Restaurant settings saved & published live!' });
+      setTimeout(() => {
+        setSettingsSaveState('idle');
+      }, 3000);
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.message || 'Failed to save settings' });
+      setSettingsSaveState('error');
+      setToast({ type: 'error', message: err.message || 'Failed to save settings. Please try again.' });
+      setTimeout(() => {
+        setSettingsSaveState('idle');
+      }, 4000);
     }
   };
 
@@ -250,23 +293,32 @@ export const AdminDashboard: React.FC = () => {
     <>
       <SEO title="Admin Control Dashboard | The Maansarovar Restaurant" noindex={true} />
 
+      {/* Reusable Toast Notification */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <div className="min-h-screen bg-cream-100 flex flex-col font-sans">
         
         {/* Admin Navigation Bar */}
-        <header className="bg-charcoal-900 text-cream-50 px-6 py-3.5 border-b border-charcoal-800 flex items-center justify-between shadow-subtle">
+        <header className="bg-charcoal-900 text-cream-50 px-4 sm:px-6 py-3.5 border-b border-charcoal-800 flex items-center justify-between shadow-subtle">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded bg-forest-800 text-saffron-400 flex items-center justify-center border border-forest-700/60 shadow-subtle">
               <Shield className="w-4 h-4" />
             </div>
             <div>
-              <h1 className="font-serif text-lg font-medium leading-none">Admin Content Management</h1>
+              <h1 className="font-serif text-lg font-medium leading-none">Admin Management</h1>
               <p className="text-[10px] text-saffron-400 font-sans mt-0.5 tracking-wider uppercase font-medium">Logged in as {user?.username || 'Admin'}</p>
             </div>
           </div>
 
           <button
             onClick={logout}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-charcoal-800 text-cream-200 text-xs font-medium uppercase tracking-wider hover:bg-red-900 hover:text-cream-50 transition-colors border border-charcoal-700/50"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-charcoal-800 text-cream-200 text-xs font-medium uppercase tracking-wider hover:bg-red-900 hover:text-cream-50 transition-colors border border-charcoal-700/50 focus:outline-none focus:ring-2 focus:ring-red-500/50"
           >
             <LogOut className="w-3.5 h-3.5" />
             <span>Logout</span>
@@ -282,7 +334,7 @@ export const AdminDashboard: React.FC = () => {
               onClick={() => setActiveTab('reservations')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded text-xs font-medium uppercase tracking-wider transition-colors ${
                 activeTab === 'reservations'
-                  ? 'bg-forest-800 text-cream-50 shadow-subtle'
+                  ? 'bg-forest-800 text-cream-50 shadow-subtle font-bold'
                   : 'bg-cream-50 text-charcoal-800 hover:bg-cream-200/70 border border-cream-300/70'
               }`}
             >
@@ -294,7 +346,7 @@ export const AdminDashboard: React.FC = () => {
               onClick={() => setActiveTab('menu')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded text-xs font-medium uppercase tracking-wider transition-colors ${
                 activeTab === 'menu'
-                  ? 'bg-forest-800 text-cream-50 shadow-subtle'
+                  ? 'bg-forest-800 text-cream-50 shadow-subtle font-bold'
                   : 'bg-cream-50 text-charcoal-800 hover:bg-cream-200/70 border border-cream-300/70'
               }`}
             >
@@ -306,7 +358,7 @@ export const AdminDashboard: React.FC = () => {
               onClick={() => setActiveTab('gallery')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded text-xs font-medium uppercase tracking-wider transition-colors ${
                 activeTab === 'gallery'
-                  ? 'bg-forest-800 text-cream-50 shadow-subtle'
+                  ? 'bg-forest-800 text-cream-50 shadow-subtle font-bold'
                   : 'bg-cream-50 text-charcoal-800 hover:bg-cream-200/70 border border-cream-300/70'
               }`}
             >
@@ -318,7 +370,7 @@ export const AdminDashboard: React.FC = () => {
               onClick={() => setActiveTab('settings')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded text-xs font-medium uppercase tracking-wider transition-colors ${
                 activeTab === 'settings'
-                  ? 'bg-forest-800 text-cream-50 shadow-subtle'
+                  ? 'bg-forest-800 text-cream-50 shadow-subtle font-bold'
                   : 'bg-cream-50 text-charcoal-800 hover:bg-cream-200/70 border border-cream-300/70'
               }`}
             >
@@ -330,7 +382,7 @@ export const AdminDashboard: React.FC = () => {
               onClick={() => setActiveTab('uploads')}
               className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded text-xs font-medium uppercase tracking-wider transition-colors ${
                 activeTab === 'uploads'
-                  ? 'bg-forest-800 text-cream-50 shadow-subtle'
+                  ? 'bg-forest-800 text-cream-50 shadow-subtle font-bold'
                   : 'bg-cream-50 text-charcoal-800 hover:bg-cream-200/70 border border-cream-300/70'
               }`}
             >
@@ -340,16 +392,12 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {/* Tab Content Panel */}
-          <div className="lg:col-span-9 bg-cream-50 rounded border border-cream-300/80 p-6 shadow-subtle min-h-[600px]">
+          <div className="lg:col-span-9 bg-cream-50 rounded border border-cream-300/80 p-5 sm:p-6 shadow-subtle min-h-[600px] relative">
             
-            {message && (
-              <div
-                className={`mb-5 p-3.5 rounded text-xs font-sans flex items-center justify-between ${
-                  message.type === 'success' ? 'bg-green-50 text-green-800 border border-green-200/80' : 'bg-red-50 text-red-800 border border-red-200/80'
-                }`}
-              >
-                <span>{message.text}</span>
-                <button onClick={() => setMessage(null)}><X className="w-4 h-4" /></button>
+            {isLoading && (
+              <div className="absolute top-3 right-4 flex items-center gap-1.5 text-[11px] text-charcoal-800/60 font-medium">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-forest-800" />
+                <span>Loading...</span>
               </div>
             )}
 
@@ -367,7 +415,7 @@ export const AdminDashboard: React.FC = () => {
                     <select
                       value={reservationStatusFilter}
                       onChange={(e) => setReservationStatusFilter(e.target.value)}
-                      className="px-3 py-1.5 bg-cream-100 border border-cream-300 rounded-lg text-xs font-semibold"
+                      className="px-3 py-1.5 bg-cream-100 border border-cream-300 rounded-lg text-xs font-semibold text-charcoal-900 focus:outline-none focus:ring-1 focus:ring-forest-700"
                     >
                       <option value="ALL">All Statuses</option>
                       <option value="NEW">NEW</option>
@@ -382,7 +430,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs font-sans border-collapse">
                       <thead>
-                        <tr className="border-b border-cream-300 text-charcoal-800/70 uppercase text-[10px] tracking-wider">
+                        <tr className="border-b border-cream-300 text-charcoal-800/70 uppercase text-[10px] tracking-wider font-semibold">
                           <th className="py-3 px-2">Guest</th>
                           <th className="py-3 px-2">Phone</th>
                           <th className="py-3 px-2">Date & Time</th>
@@ -393,7 +441,7 @@ export const AdminDashboard: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-cream-200">
                         {reservations.map((r) => (
-                          <tr key={r.id} className="hover:bg-cream-100/60">
+                          <tr key={r.id} className="hover:bg-cream-100/60 transition-colors">
                             <td className="py-3 px-2 font-semibold text-charcoal-900">{r.guestName}</td>
                             <td className="py-3 px-2 font-mono text-forest-800">{r.guestPhone}</td>
                             <td className="py-3 px-2 text-charcoal-800">{r.reservationDate} at {r.reservationTime}</td>
@@ -403,29 +451,48 @@ export const AdminDashboard: React.FC = () => {
                                 r.status === 'NEW' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
                                 r.status === 'CONFIRMED' ? 'bg-green-100 text-green-800 border border-green-300' :
                                 r.status === 'CONTACTED' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
-                                'bg-gray-100 text-gray-700'
+                                'bg-gray-100 text-gray-700 border border-gray-300'
                               }`}>
                                 {r.status}
                               </span>
                             </td>
-                            <td className="py-3 px-2 text-right space-x-1">
+                            <td className="py-3 px-2 text-right space-x-1 relative">
                               <select
                                 value={r.status}
                                 onChange={(e) => handleUpdateReservationStatus(r.id, e.target.value)}
-                                className="px-2 py-1 bg-cream-100 border border-cream-300 rounded text-[10px]"
+                                className="px-2 py-1 bg-cream-100 border border-cream-300 rounded text-[10px] text-charcoal-900 font-semibold"
                               >
                                 <option value="NEW">NEW</option>
                                 <option value="CONTACTED">CONTACTED</option>
                                 <option value="CONFIRMED">CONFIRMED</option>
                                 <option value="CLOSED">CLOSED</option>
                               </select>
-                              <button
-                                onClick={() => handleDeleteReservation(r.id)}
-                                className="p-1 rounded text-red-600 hover:bg-red-50"
-                                title="Delete"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              
+                              <div className="inline-block relative">
+                                <button
+                                  onClick={() => setActiveDeleteConfirm({
+                                    type: 'reservation',
+                                    id: r.id,
+                                    title: `Delete reservation for ${r.guestName}?`
+                                  })}
+                                  className="p-1 rounded text-red-700 hover:bg-red-100/70 transition-colors inline-flex items-center justify-center align-middle"
+                                  title="Delete Reservation"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                                
+                                {activeDeleteConfirm?.type === 'reservation' && activeDeleteConfirm.id === r.id && (
+                                  <InlineConfirm
+                                    isOpen={true}
+                                    title={activeDeleteConfirm.title}
+                                    message="This reservation entry will be permanently removed."
+                                    confirmLabel="Delete"
+                                    align="right"
+                                    onConfirm={() => confirmDeleteReservation(r.id)}
+                                    onCancel={() => setActiveDeleteConfirm(null)}
+                                  />
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -446,7 +513,7 @@ export const AdminDashboard: React.FC = () => {
               <div className="space-y-8">
                 
                 {/* Categories Management Section */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
+                <div className="bg-cream-100 p-4 sm:p-5 rounded-xl border border-cream-300 space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-serif text-lg font-bold text-charcoal-900 flex items-center gap-2">
@@ -460,7 +527,7 @@ export const AdminDashboard: React.FC = () => {
                         setEditingCategory({ name: '', slug: '', description: '', displayOrder: categories.length + 1, isActive: true });
                         setShowCategoryModal(true);
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-forest-800 text-cream-50 text-xs uppercase tracking-wider font-semibold flex items-center gap-1 hover:bg-forest-700"
+                      className="px-3 py-1.5 rounded-lg bg-forest-800 text-cream-50 text-xs uppercase tracking-wider font-semibold flex items-center gap-1 hover:bg-forest-700 transition-colors shadow-xs"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>Add Category</span>
@@ -470,7 +537,7 @@ export const AdminDashboard: React.FC = () => {
                   {categories.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {categories.map((cat) => (
-                        <div key={cat.id} className="p-3 bg-cream-50 rounded-xl border border-cream-200 flex items-center justify-between gap-2">
+                        <div key={cat.id} className="p-3 bg-cream-50 rounded-lg border border-cream-200 flex items-center justify-between gap-2 relative">
                           <div>
                             <h4 className="font-serif font-bold text-xs text-charcoal-900">{cat.name}</h4>
                             <p className="text-[10px] text-charcoal-800/60 line-clamp-1">{cat.description || cat.slug}</p>
@@ -481,16 +548,37 @@ export const AdminDashboard: React.FC = () => {
                                 setEditingCategory(cat);
                                 setShowCategoryModal(true);
                               }}
-                              className="p-1 rounded bg-cream-200 text-charcoal-800 hover:bg-saffron-500"
+                              className="p-1 rounded bg-cream-200 text-charcoal-800 hover:bg-saffron-500 hover:text-charcoal-950 transition-colors"
+                              title="Edit Category"
                             >
                               <Edit2 className="w-3 h-3" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteCategory(cat.id)}
-                              className="p-1 rounded bg-cream-200 text-red-600 hover:bg-red-600 hover:text-white"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+
+                            <div className="relative">
+                              <button
+                                onClick={() => setActiveDeleteConfirm({
+                                  type: 'category',
+                                  id: cat.id,
+                                  title: `Delete category "${cat.name}"?`
+                                })}
+                                className="p-1 rounded bg-cream-200 text-red-700 hover:bg-red-700 hover:text-white transition-colors"
+                                title="Delete Category"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+
+                              {activeDeleteConfirm?.type === 'category' && activeDeleteConfirm.id === cat.id && (
+                                <InlineConfirm
+                                  isOpen={true}
+                                  title={activeDeleteConfirm.title}
+                                  message="Dishes linked to this category may be affected."
+                                  confirmLabel="Delete"
+                                  align="right"
+                                  onConfirm={() => confirmDeleteCategory(cat.id)}
+                                  onCancel={() => setActiveDeleteConfirm(null)}
+                                />
+                              )}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -510,14 +598,14 @@ export const AdminDashboard: React.FC = () => {
                     <button
                       onClick={() => {
                         setEditingMenuItem({
-                          name: '', description: '', price: 150, categoryId: categories[0]?.id || 1,
+                          name: '', description: '', price: 150, rawPrice: '150', categoryId: categories[0]?.id || 1,
                           isVegetarian: true, isChefSpecial: false, isAvailable: true,
                           imageUrl: '/images/illustrative-food/illustrative-food-01.jpg',
                           imageSourceType: 'OWNER_PHOTO'
                         });
                         setShowMenuModal(true);
                       }}
-                      className="px-4 py-2 rounded-xl bg-forest-800 text-cream-50 text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5 hover:bg-forest-700"
+                      className="px-4 py-2 rounded-xl bg-forest-800 text-cream-50 text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5 hover:bg-forest-700 transition-colors shadow-xs"
                     >
                       <Plus className="w-4 h-4" />
                       <span>Add New Dish</span>
@@ -527,7 +615,7 @@ export const AdminDashboard: React.FC = () => {
                   {menuItems.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {menuItems.map((item) => (
-                        <div key={item.id} className="p-4 bg-cream-100 rounded-xl border border-cream-300 flex items-start justify-between gap-3">
+                        <div key={item.id} className="p-4 bg-cream-100 rounded-xl border border-cream-300 flex items-start justify-between gap-3 relative">
                           <div>
                             <div className="flex items-center gap-2">
                               <span className={`w-2 h-2 rounded-full ${item.isVegetarian ? 'bg-green-600' : 'bg-red-600'}`} />
@@ -549,7 +637,7 @@ export const AdminDashboard: React.FC = () => {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 shrink-0">
                             <button
                               onClick={() => {
                                 setEditingMenuItem({
@@ -557,6 +645,7 @@ export const AdminDashboard: React.FC = () => {
                                   name: item.name,
                                   description: item.description,
                                   price: item.price,
+                                  rawPrice: String(item.price),
                                   categoryId: item.category?.id || categories[0]?.id || 1,
                                   isVegetarian: item.isVegetarian,
                                   isChefSpecial: item.isChefSpecial,
@@ -567,16 +656,37 @@ export const AdminDashboard: React.FC = () => {
                                 });
                                 setShowMenuModal(true);
                               }}
-                              className="p-1.5 rounded bg-cream-200 text-charcoal-800 hover:bg-saffron-500 hover:text-charcoal-950"
+                              className="p-1.5 rounded bg-cream-200 text-charcoal-800 hover:bg-saffron-500 hover:text-charcoal-950 transition-colors"
+                              title="Edit Dish"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteMenuItem(item.id)}
-                              className="p-1.5 rounded bg-cream-200 text-red-600 hover:bg-red-600 hover:text-white"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+
+                            <div className="relative">
+                              <button
+                                onClick={() => setActiveDeleteConfirm({
+                                  type: 'menu',
+                                  id: item.id,
+                                  title: `Delete dish "${item.name}"?`
+                                })}
+                                className="p-1.5 rounded bg-cream-200 text-red-700 hover:bg-red-700 hover:text-white transition-colors"
+                                title="Delete Dish"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              {activeDeleteConfirm?.type === 'menu' && activeDeleteConfirm.id === item.id && (
+                                <InlineConfirm
+                                  isOpen={true}
+                                  title={activeDeleteConfirm.title}
+                                  message="This dish will be removed from the active menu."
+                                  confirmLabel="Delete"
+                                  align="right"
+                                  onConfirm={() => confirmDeleteMenuItem(item.id)}
+                                  onCancel={() => setActiveDeleteConfirm(null)}
+                                />
+                              )}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -603,7 +713,7 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                   <button
                     onClick={() => setShowGalleryModal(true)}
-                    className="px-4 py-2 rounded-xl bg-forest-800 text-cream-50 text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5 hover:bg-forest-700"
+                    className="px-4 py-2 rounded-xl bg-forest-800 text-cream-50 text-xs uppercase tracking-wider font-semibold flex items-center gap-1.5 hover:bg-forest-700 transition-colors shadow-xs"
                   >
                     <Plus className="w-4 h-4" />
                     <span>Add Photo Entry</span>
@@ -619,12 +729,32 @@ export const AdminDashboard: React.FC = () => {
                           <span className="text-[10px] text-saffron-600 font-bold uppercase">{img.category}</span>
                           <h5 className="font-serif font-bold text-charcoal-900 truncate">{img.title}</h5>
                         </div>
-                        <button
-                          onClick={() => handleDeleteGalleryImage(img.id)}
-                          className="absolute top-3 right-3 p-1.5 rounded-full bg-red-600 text-white shadow-md hover:bg-red-700"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        
+                        <div className="absolute top-3 right-3">
+                          <button
+                            onClick={() => setActiveDeleteConfirm({
+                              type: 'gallery',
+                              id: img.id,
+                              title: `Delete gallery entry "${img.title}"?`
+                            })}
+                            className="p-1.5 rounded-full bg-red-700 text-white shadow-md hover:bg-red-800 transition-colors"
+                            title="Delete Photo Entry"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {activeDeleteConfirm?.type === 'gallery' && activeDeleteConfirm.id === img.id && (
+                            <InlineConfirm
+                              isOpen={true}
+                              title={activeDeleteConfirm.title}
+                              message="This entry will be removed from the photo gallery."
+                              confirmLabel="Delete"
+                              align="right"
+                              onConfirm={() => confirmDeleteGalleryImage(img.id)}
+                              onCancel={() => setActiveDeleteConfirm(null)}
+                            />
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -642,267 +772,301 @@ export const AdminDashboard: React.FC = () => {
             {activeTab === 'settings' && (
               <form onSubmit={handleSaveSettings} className="space-y-6 font-sans text-xs">
                 
-                <div className="flex items-center justify-between pb-2 border-b border-cream-300">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-cream-300/80 gap-3">
                   <div>
-                    <h2 className="font-serif text-2xl font-bold text-charcoal-900">Website Content & Business Settings</h2>
-                    <p className="text-xs text-charcoal-800/60">Update any normal business text live on the website without code changes.</p>
+                    <h2 className="font-serif text-2xl font-bold text-charcoal-900">Branding & Business Settings</h2>
+                    <p className="text-xs text-charcoal-800/60 mt-0.5">Manage live website content, contact info, hours, and identity assets.</p>
                   </div>
+                  
+                  {/* Phase 2: Micro-interaction Save Button */}
                   <button
                     type="submit"
-                    className="px-6 py-2.5 bg-forest-800 text-cream-50 font-bold uppercase tracking-wider text-xs rounded-xl hover:bg-forest-700 shadow-md"
+                    disabled={settingsSaveState === 'saving'}
+                    className={`px-6 py-2.5 rounded-xl font-bold uppercase tracking-wider text-xs transition-all flex items-center justify-center gap-2 shadow-sm min-w-[220px] focus:outline-none focus:ring-2 focus:ring-forest-700 ${
+                      settingsSaveState === 'saving'
+                        ? 'bg-forest-900/80 text-cream-200 cursor-wait'
+                        : settingsSaveState === 'saved'
+                        ? 'bg-emerald-800 text-white shadow-emerald-900/20'
+                        : settingsSaveState === 'error'
+                        ? 'bg-red-800 text-white'
+                        : 'bg-forest-800 text-cream-50 hover:bg-forest-700'
+                    }`}
                   >
-                    Save & Publish Live
+                    {settingsSaveState === 'saving' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-saffron-400" />
+                        <span>Saving…</span>
+                      </>
+                    ) : settingsSaveState === 'saved' ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-300 animate-bounce" />
+                        <span>✓ Saved & Published</span>
+                      </>
+                    ) : settingsSaveState === 'error' ? (
+                      <>
+                        <AlertCircle className="w-3.5 h-3.5 text-white" />
+                        <span>Error Saving</span>
+                      </>
+                    ) : (
+                      <span>Save All Settings & Publish Live</span>
+                    )}
                   </button>
                 </div>
 
-                {/* Card 1: Business Identity & Branding */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
-                  <h3 className="font-serif text-base font-bold text-charcoal-900 uppercase tracking-wider text-forest-800">
-                    1. Identity & Branding
-                  </h3>
+                {/* PHASE 1 RESTRUCTURED SECTIONS */}
+                
+                {/* SECTION 1: IDENTITY */}
+                <div className="space-y-4 pt-1">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <Shield className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 1 — Identity</h3>
+                  </div>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Business Name (`restaurant_name`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Business Name (`restaurant_name`)</label>
                       <input
                         type="text"
                         value={settings.restaurant_name || ''}
                         onChange={(e) => setSettings({ ...settings, restaurant_name: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Business Subtitle / Category (`business_category`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Business Subtitle / Category (`business_category`)</label>
                       <input
                         type="text"
                         value={settings.business_category || ''}
                         onChange={(e) => setSettings({ ...settings, business_category: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Restaurant & Food Court"
                       />
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Location Badge (`location_badge`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Location Badge (`location_badge`)</label>
                       <input
                         type="text"
                         value={settings.location_badge || ''}
                         onChange={(e) => setSettings({ ...settings, location_badge: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Lakhimpur Kheri • Beside Amrit Sarovar"
                       />
                     </div>
+                  </div>
+                </div>
 
+                {/* SECTION 2: HERO CONTENT */}
+                <div className="space-y-4 pt-3">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <FileImage className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 2 — Hero Content</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Hero Title Line 1 (`hero_headline_line1`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Hero Title Line 1 (`hero_headline_line1`)</label>
                       <input
                         type="text"
                         value={settings.hero_headline_line1 || ''}
                         onChange={(e) => setSettings({ ...settings, hero_headline_line1: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="The Maansarovar"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Hero Title Line 2 (`hero_headline_line2`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Hero Title Line 2 (`hero_headline_line2`)</label>
                       <input
                         type="text"
                         value={settings.hero_headline_line2 || ''}
                         onChange={(e) => setSettings({ ...settings, hero_headline_line2: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Restaurant & Food Court"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <label className="font-bold uppercase tracking-wider block mb-1">Hero Tagline (`tagline`)</label>
+                    <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Hero Tagline (`tagline`)</label>
                     <input
                       type="text"
                       value={settings.tagline || ''}
                       onChange={(e) => setSettings({ ...settings, tagline: e.target.value })}
-                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       placeholder="e.g. Pure Vegetarian Delights & Cozy Dining"
                     />
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-cream-200">
+                {/* SECTION 3: BRAND ASSETS */}
+                <div className="space-y-4 pt-3">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <ImageIcon className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 3 — Brand Assets</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <ImageUploader
                       value={settings.logo_image_url || ''}
                       onChange={(url) => setSettings({ ...settings, logo_image_url: url })}
-                      label="Custom Logo Image (`logo_image_url`)"
-                      helperText="Upload official restaurant logo (JPG, PNG, WebP <= 5MB)"
+                      label="Custom Logo (`logo_image_url`)"
+                      helperText="Official restaurant logo asset (JPG, PNG, WebP <= 5MB)"
                     />
 
                     <ImageUploader
                       value={settings.hero_image_url || ''}
                       onChange={(url) => setSettings({ ...settings, hero_image_url: url })}
                       label="Hero Background Banner (`hero_image_url`)"
-                      helperText="Upload custom hero banner image (JPG, PNG, WebP <= 5MB)"
+                      helperText="Custom hero header photo (JPG, PNG, WebP <= 5MB)"
                     />
                   </div>
                 </div>
 
-                {/* Card 2: About & Story */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
-                  <h3 className="font-serif text-base font-bold text-charcoal-900 uppercase tracking-wider text-forest-800">
-                    2. About Page Story & Overview
-                  </h3>
+                {/* SECTION 4: CONTACT, LOCATION & HOURS */}
+                <div className="space-y-4 pt-3">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <Phone className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 4 — Contact, Location & Opening Hours</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Phone Number (`phone`)</label>
+                      <input
+                        type="text"
+                        value={settings.phone || ''}
+                        onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
+                        placeholder="Leave blank to hide phone link"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">WhatsApp Number (`whatsapp`)</label>
+                      <input
+                        type="text"
+                        value={settings.whatsapp || ''}
+                        onChange={(e) => setSettings({ ...settings, whatsapp: e.target.value })}
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
+                        placeholder="Leave blank to hide WhatsApp link"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Public Email Address (`email`)</label>
+                      <input
+                        type="text"
+                        value={settings.email || ''}
+                        onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
+                        placeholder="Leave blank to hide email link"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Address Location (`address`)</label>
+                      <textarea
+                        rows={2}
+                        value={settings.address || ''}
+                        onChange={(e) => setSettings({ ...settings, address: e.target.value })}
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Opening Hours (`opening_hours`)</label>
+                      <input
+                        type="text"
+                        value={settings.opening_hours || ''}
+                        onChange={(e) => setSettings({ ...settings, opening_hours: e.target.value })}
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
+                        placeholder="9:00 AM – 11:00 PM"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* SECTION 5: ABOUT STORY */}
+                <div className="space-y-4 pt-3">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <FileText className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 5 — About Story</h3>
+                  </div>
 
                   <div>
-                    <label className="font-bold uppercase tracking-wider block mb-1">About Section Heading (`about_heading`)</label>
+                    <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">About Section Heading (`about_heading`)</label>
                     <input
                       type="text"
                       value={settings.about_heading || ''}
                       onChange={(e) => setSettings({ ...settings, about_heading: e.target.value })}
-                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       placeholder="About Our Establishment"
                     />
                   </div>
 
                   <div>
-                    <label className="font-bold uppercase tracking-wider block mb-1">About Story / Overview Text (`about_story`)</label>
+                    <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">About Story / Overview Text (`about_story`)</label>
                     <textarea
                       rows={3}
                       value={settings.about_story || ''}
                       onChange={(e) => setSettings({ ...settings, about_story: e.target.value })}
-                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       placeholder="Detailed background text displayed on Home and About pages..."
                     />
                   </div>
                 </div>
 
-                {/* Card 3: Contact Details & Timings */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
-                  <h3 className="font-serif text-base font-bold text-charcoal-900 uppercase tracking-wider text-forest-800">
-                    3. Contact Details & Operating Hours
-                  </h3>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Opening Hours (`opening_hours`)</label>
-                      <input
-                        type="text"
-                        value={settings.opening_hours || ''}
-                        onChange={(e) => setSettings({ ...settings, opening_hours: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
-                        placeholder="9:00 AM – 11:00 PM"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Phone Number (`phone`)</label>
-                      <input
-                        type="text"
-                        value={settings.phone || ''}
-                        onChange={(e) => setSettings({ ...settings, phone: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
-                        placeholder="Leave blank to hide Call buttons"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">WhatsApp Number (`whatsapp`)</label>
-                      <input
-                        type="text"
-                        value={settings.whatsapp || ''}
-                        onChange={(e) => setSettings({ ...settings, whatsapp: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
-                        placeholder="Leave blank to hide WhatsApp button"
-                      />
-                    </div>
+                {/* SECTION 6: MAPS & NOTICES */}
+                <div className="space-y-4 pt-3">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <MapPin className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 6 — Maps & Announcement Notices</h3>
                   </div>
-
-                  <div>
-                    <label className="font-bold uppercase tracking-wider block mb-1">Public Email Address (`email`)</label>
-                    <input
-                      type="text"
-                      value={settings.email || ''}
-                      onChange={(e) => setSettings({ ...settings, email: e.target.value })}
-                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
-                      placeholder="Leave blank to hide email link"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="font-bold uppercase tracking-wider block mb-1">Address Text (`address`)</label>
-                    <textarea
-                      rows={2}
-                      value={settings.address || ''}
-                      onChange={(e) => setSettings({ ...settings, address: e.target.value })}
-                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Card 4: Location Maps Integration */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
-                  <h3 className="font-serif text-base font-bold text-charcoal-900 uppercase tracking-wider text-forest-800">
-                    4. Google Maps Integration
-                  </h3>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Google Maps Direct Listing URL (`google_maps_direct`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Google Maps Listing URL (`google_maps_direct`)</label>
                       <input
                         type="text"
                         value={settings.google_maps_direct || ''}
                         onChange={(e) => setSettings({ ...settings, google_maps_direct: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Google Maps Embed URL (`map_url`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Google Maps Embed URL (`map_url`)</label>
                       <input
                         type="text"
                         value={settings.map_url || ''}
                         onChange={(e) => setSettings({ ...settings, map_url: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       />
                     </div>
-                  </div>
-                </div>
-
-                {/* Card 5: Notices & Banners */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
-                  <h3 className="font-serif text-base font-bold text-charcoal-900 uppercase tracking-wider text-forest-800">
-                    5. Notices & Announcement Banner
-                  </h3>
-
-                  <div>
-                    <label className="font-bold uppercase tracking-wider block mb-1">Menu Page Notice Text (`menu_notice`)</label>
-                    <input
-                      type="text"
-                      value={settings.menu_notice || ''}
-                      onChange={(e) => setSettings({ ...settings, menu_notice: e.target.value })}
-                      className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
-                      placeholder="Our menu will be available soon."
-                    />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
                     <div className="sm:col-span-2">
-                      <label className="font-bold uppercase tracking-wider block mb-1">Top Announcement Banner Text (`announcement_text`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Announcement Banner Text (`announcement_text`)</label>
                       <input
                         type="text"
                         value={settings.announcement_text || ''}
                         onChange={(e) => setSettings({ ...settings, announcement_text: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Open daily · 9:00 AM – 11:00 PM · Beside Zila Panchayat Amrit Sarovar"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Show Banner (`announcement_enabled`)</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Show Top Banner (`announcement_enabled`)</label>
                       <select
                         value={settings.announcement_enabled || 'true'}
                         onChange={(e) => setSettings({ ...settings, announcement_enabled: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm font-semibold"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm font-semibold text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                       >
                         <option value="true">Show Top Banner</option>
                         <option value="false">Hide Top Banner</option>
@@ -911,42 +1075,43 @@ export const AdminDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Card 6: Social Media Links */}
-                <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300 space-y-4">
-                  <h3 className="font-serif text-base font-bold text-charcoal-900 uppercase tracking-wider text-forest-800">
-                    6. Social Media Channels
-                  </h3>
+                {/* SECTION 7: SOCIAL CHANNELS */}
+                <div className="space-y-4 pt-3">
+                  <div className="flex items-center gap-2 border-b border-cream-200/80 pb-2">
+                    <Share2 className="w-4 h-4 text-forest-800 shrink-0" />
+                    <h3 className="font-serif text-base font-bold text-charcoal-900">Section 7 — Social Media Links</h3>
+                  </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Facebook URL</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Facebook URL</label>
                       <input
                         type="text"
                         value={settings.social_facebook || ''}
                         onChange={(e) => setSettings({ ...settings, social_facebook: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Optional"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">Instagram URL</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">Instagram URL</label>
                       <input
                         type="text"
                         value={settings.social_instagram || ''}
                         onChange={(e) => setSettings({ ...settings, social_instagram: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Optional"
                       />
                     </div>
 
                     <div>
-                      <label className="font-bold uppercase tracking-wider block mb-1">TripAdvisor URL</label>
+                      <label className="font-bold uppercase tracking-wider block mb-1 text-charcoal-900">TripAdvisor URL</label>
                       <input
                         type="text"
                         value={settings.social_tripadvisor || ''}
                         onChange={(e) => setSettings({ ...settings, social_tripadvisor: e.target.value })}
-                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm"
+                        className="w-full p-2.5 bg-cream-50 border border-cream-300 rounded-lg text-sm text-charcoal-900 focus:ring-1 focus:ring-forest-700 focus:outline-none"
                         placeholder="Optional"
                       />
                     </div>
@@ -956,9 +1121,28 @@ export const AdminDashboard: React.FC = () => {
                 <div className="pt-4 flex justify-end">
                   <button
                     type="submit"
-                    className="px-8 py-3 bg-forest-800 text-cream-50 font-bold uppercase tracking-wider text-sm rounded-xl hover:bg-forest-700 shadow-md transition-all"
+                    disabled={settingsSaveState === 'saving'}
+                    className={`px-8 py-3 rounded-xl font-bold uppercase tracking-wider text-sm transition-all flex items-center justify-center gap-2 shadow-md ${
+                      settingsSaveState === 'saving'
+                        ? 'bg-forest-900/80 text-cream-200 cursor-wait'
+                        : settingsSaveState === 'saved'
+                        ? 'bg-emerald-800 text-white'
+                        : 'bg-forest-800 text-cream-50 hover:bg-forest-700'
+                    }`}
                   >
-                    Save All Settings & Publish Live
+                    {settingsSaveState === 'saving' ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-saffron-400" />
+                        <span>Saving Settings...</span>
+                      </>
+                    ) : settingsSaveState === 'saved' ? (
+                      <>
+                        <Check className="w-4 h-4 text-emerald-300 animate-bounce" />
+                        <span>✓ Saved & Published</span>
+                      </>
+                    ) : (
+                      <span>Save All Settings & Publish Live</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -970,14 +1154,14 @@ export const AdminDashboard: React.FC = () => {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-cream-300">
                   <div>
                     <h2 className="font-serif text-2xl font-bold text-charcoal-900">Uploaded Image Storage</h2>
-                    <p className="text-xs text-charcoal-800/60">Upload new images directly to persistent local storage and manage uploaded files.</p>
+                    <p className="text-xs text-charcoal-800/60">Upload new images directly to persistent storage and manage uploaded files.</p>
                   </div>
                 </div>
 
                 <div className="bg-cream-100 p-5 rounded-2xl border border-cream-300">
                   <ImageUploader
                     onChange={(url) => {
-                      setMessage({ type: 'success', text: `Image uploaded successfully: ${url}` });
+                      setToast({ type: 'success', message: `Image uploaded successfully: ${url}` });
                       loadData();
                     }}
                     label="Direct Image Uploader"
@@ -988,7 +1172,6 @@ export const AdminDashboard: React.FC = () => {
                 <div className="space-y-4">
                   <h3 className="font-serif text-lg font-bold text-charcoal-900">Recently Uploaded Files in Use</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {/* Combine images used across settings, gallery, menu */}
                     {Array.from(new Set([
                       settings.logo_image_url,
                       settings.hero_image_url,
@@ -997,7 +1180,7 @@ export const AdminDashboard: React.FC = () => {
                     ].filter((url): url is string => !!url && url.startsWith('/uploads/')))).map((url) => {
                       const filename = url.replace('/uploads/', '');
                       return (
-                        <div key={url} className="p-3 bg-cream-100 rounded-xl border border-cream-300 flex items-center justify-between gap-3">
+                        <div key={url} className="p-3 bg-cream-100 rounded-xl border border-cream-300 flex items-center justify-between gap-3 relative">
                           <div className="flex items-center gap-3 min-w-0">
                             <img src={url} alt={filename} className="w-12 h-12 object-cover rounded-lg shrink-0 bg-charcoal-950" />
                             <div className="min-w-0">
@@ -1006,28 +1189,31 @@ export const AdminDashboard: React.FC = () => {
                             </div>
                           </div>
 
-                          <button
-                            onClick={async () => {
-                              try {
-                                const refs = await checkImageReferencesAdmin(filename);
-                                if (refs.length > 0) {
-                                  alert(`Cannot delete '${filename}'. It is currently referenced in:\n\n• ` + refs.join('\n• '));
-                                  return;
-                                }
-                                if (window.confirm(`Are you sure you want to delete '${filename}'?`)) {
-                                  await deleteImageAdmin(filename);
-                                  setMessage({ type: 'success', text: `Deleted ${filename}` });
-                                  loadData();
-                                }
-                              } catch (err: any) {
-                                setMessage({ type: 'error', text: err.message || 'Failed to check or delete file' });
-                              }
-                            }}
-                            className="p-2 rounded bg-cream-200 text-red-600 hover:bg-red-600 hover:text-white shrink-0"
-                            title="Safe Delete Check"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="relative shrink-0">
+                            <button
+                              onClick={() => setActiveDeleteConfirm({
+                                type: 'upload',
+                                id: filename,
+                                title: `Delete image "${filename}"?`
+                              })}
+                              className="p-2 rounded bg-cream-200 text-red-700 hover:bg-red-700 hover:text-white transition-colors"
+                              title="Delete Uploaded File"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+
+                            {activeDeleteConfirm?.type === 'upload' && activeDeleteConfirm.id === filename && (
+                              <InlineConfirm
+                                isOpen={true}
+                                title={activeDeleteConfirm.title}
+                                message="Checks will verify this asset is not active before removal."
+                                confirmLabel="Delete"
+                                align="right"
+                                onConfirm={() => confirmDeleteUploadFile(filename)}
+                                onCancel={() => setActiveDeleteConfirm(null)}
+                              />
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -1042,61 +1228,61 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Menu Category Modal */}
         {showCategoryModal && (
-          <div className="fixed inset-0 z-50 bg-charcoal-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-charcoal-950/80 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-cream-50 rounded-2xl p-6 max-w-md w-full border border-cream-300 shadow-2xl">
               <div className="flex items-center justify-between mb-4 border-b pb-2">
-                <h3 className="font-serif text-xl font-bold">{editingCategory.id ? 'Edit Category' : 'Add New Category'}</h3>
-                <button onClick={() => setShowCategoryModal(false)}><X className="w-5 h-5" /></button>
+                <h3 className="font-serif text-xl font-bold text-charcoal-900">{editingCategory.id ? 'Edit Category' : 'Add New Category'}</h3>
+                <button onClick={() => setShowCategoryModal(false)} className="text-charcoal-800/60 hover:text-charcoal-900"><X className="w-5 h-5" /></button>
               </div>
 
               <form onSubmit={handleSaveCategory} className="space-y-3 font-sans text-xs">
                 <div>
-                  <label className="font-bold uppercase block mb-1">Category Name *</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Category Name *</label>
                   <input
                     type="text"
                     required
                     value={editingCategory.name || ''}
                     onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                     placeholder="e.g. Starters & Tandoor"
                   />
                 </div>
 
                 <div>
-                  <label className="font-bold uppercase block mb-1">URL Slug</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">URL Slug</label>
                   <input
                     type="text"
                     value={editingCategory.slug || ''}
                     onChange={(e) => setEditingCategory({ ...editingCategory, slug: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                     placeholder="Auto-generated if left blank"
                   />
                 </div>
 
                 <div>
-                  <label className="font-bold uppercase block mb-1">Description</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Description</label>
                   <textarea
                     rows={2}
                     value={editingCategory.description || ''}
                     onChange={(e) => setEditingCategory({ ...editingCategory, description: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                     placeholder="Short description for menu header"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-bold uppercase block mb-1">Display Order</label>
+                    <label className="font-bold uppercase block mb-1 text-charcoal-900">Display Order</label>
                     <input
                       type="number"
                       value={editingCategory.displayOrder || 1}
                       onChange={(e) => setEditingCategory({ ...editingCategory, displayOrder: parseInt(e.target.value) || 1 })}
-                      className="w-full p-2 bg-cream-100 border rounded"
+                      className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                     />
                   </div>
 
                   <div className="flex items-center pt-5">
-                    <label className="inline-flex items-center gap-2 cursor-pointer font-bold uppercase">
+                    <label className="inline-flex items-center gap-2 cursor-pointer font-bold uppercase text-charcoal-900">
                       <input
                         type="checkbox"
                         checked={editingCategory.isActive !== false}
@@ -1108,8 +1294,8 @@ export const AdminDashboard: React.FC = () => {
                 </div>
 
                 <div className="pt-3 flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowCategoryModal(false)} className="px-4 py-2 rounded bg-cream-200 font-bold">Cancel</button>
-                  <button type="submit" className="px-4 py-2 rounded bg-forest-800 text-white font-bold">Save Category</button>
+                  <button type="button" onClick={() => setShowCategoryModal(false)} className="px-4 py-2 rounded bg-cream-200 text-charcoal-800 font-bold">Cancel</button>
+                  <button type="submit" className="px-4 py-2 rounded bg-forest-800 text-white font-bold hover:bg-forest-700">Save Category</button>
                 </div>
               </form>
             </div>
@@ -1118,53 +1304,68 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Menu Item Modal */}
         {showMenuModal && (
-          <div className="fixed inset-0 z-50 bg-charcoal-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-cream-50 rounded-2xl p-6 max-w-lg w-full border border-cream-300 shadow-2xl">
+          <div className="fixed inset-0 z-50 bg-charcoal-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-cream-50 rounded-2xl p-6 max-w-lg w-full border border-cream-300 shadow-2xl max-h-[90vh] overflow-y-auto">
               <div className="flex items-center justify-between mb-4 border-b pb-2">
-                <h3 className="font-serif text-xl font-bold">{editingMenuItem.id ? 'Edit Dish' : 'Add New Dish'}</h3>
-                <button onClick={() => setShowMenuModal(false)}><X className="w-5 h-5" /></button>
+                <h3 className="font-serif text-xl font-bold text-charcoal-900">{editingMenuItem.id ? 'Edit Dish' : 'Add New Dish'}</h3>
+                <button onClick={() => setShowMenuModal(false)} className="text-charcoal-800/60 hover:text-charcoal-900"><X className="w-5 h-5" /></button>
               </div>
 
               <form onSubmit={handleSaveMenuItem} className="space-y-3 font-sans text-xs">
                 <div>
-                  <label className="font-bold uppercase block mb-1">Dish Name *</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Dish Name *</label>
                   <input
                     type="text"
                     required
                     value={editingMenuItem.name}
                     onChange={(e) => setEditingMenuItem({ ...editingMenuItem, name: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                   />
                 </div>
 
                 <div>
-                  <label className="font-bold uppercase block mb-1">Description</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Description</label>
                   <textarea
                     rows={2}
                     value={editingMenuItem.description}
                     onChange={(e) => setEditingMenuItem({ ...editingMenuItem, description: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
+                  {/* PHASE 3 BUG FIX: Allow temporary empty raw string state for price input during editing */}
                   <div>
-                    <label className="font-bold uppercase block mb-1">Price (₹) *</label>
+                    <label className="font-bold uppercase block mb-1 text-charcoal-900">Price (₹) *</label>
                     <input
                       type="number"
+                      step="any"
                       required
-                      value={editingMenuItem.price}
-                      onChange={(e) => setEditingMenuItem({ ...editingMenuItem, price: parseFloat(e.target.value) || 0 })}
-                      className="w-full p-2 bg-cream-100 border rounded"
+                      value={editingMenuItem.rawPrice ?? String(editingMenuItem.price ?? '')}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditingMenuItem({
+                          ...editingMenuItem,
+                          rawPrice: val,
+                          price: val === '' ? 0 : parseFloat(val) || 0
+                        });
+                      }}
+                      onBlur={() => {
+                        if (!editingMenuItem.rawPrice || parseFloat(editingMenuItem.rawPrice) <= 0) {
+                          setEditingMenuItem({ ...editingMenuItem, rawPrice: String(editingMenuItem.price || 100) });
+                        }
+                      }}
+                      className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900 font-mono"
+                      placeholder="e.g. 150"
                     />
                   </div>
 
                   <div>
-                    <label className="font-bold uppercase block mb-1">Category *</label>
+                    <label className="font-bold uppercase block mb-1 text-charcoal-900">Category *</label>
                     <select
                       value={editingMenuItem.categoryId}
                       onChange={(e) => setEditingMenuItem({ ...editingMenuItem, categoryId: parseInt(e.target.value) })}
-                      className="w-full p-2 bg-cream-100 border rounded"
+                      className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900 font-semibold"
                     >
                       {categories.map((c) => (
                         <option key={c.id} value={c.id}>{c.name}</option>
@@ -1174,7 +1375,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-4 py-2">
-                  <label className="inline-flex items-center gap-1.5 cursor-pointer font-bold">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer font-bold text-charcoal-900">
                     <input
                       type="checkbox"
                       checked={editingMenuItem.isVegetarian}
@@ -1183,7 +1384,7 @@ export const AdminDashboard: React.FC = () => {
                     <span>Vegetarian</span>
                   </label>
 
-                  <label className="inline-flex items-center gap-1.5 cursor-pointer font-bold">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer font-bold text-charcoal-900">
                     <input
                       type="checkbox"
                       checked={editingMenuItem.isChefSpecial}
@@ -1202,22 +1403,22 @@ export const AdminDashboard: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="font-bold uppercase block mb-1">Image Alt Text</label>
+                    <label className="font-bold uppercase block mb-1 text-charcoal-900">Image Alt Text</label>
                     <input
                       type="text"
                       value={editingMenuItem.imageAltText || ''}
                       onChange={(e) => setEditingMenuItem({ ...editingMenuItem, imageAltText: e.target.value })}
-                      className="w-full p-2 bg-cream-100 border rounded"
+                      className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                       placeholder="Descriptive image alt text"
                     />
                   </div>
 
                   <div>
-                    <label className="font-bold uppercase block mb-1">Image Source Type</label>
+                    <label className="font-bold uppercase block mb-1 text-charcoal-900">Image Source Type</label>
                     <select
                       value={editingMenuItem.imageSourceType || 'OWNER_PHOTO'}
                       onChange={(e) => setEditingMenuItem({ ...editingMenuItem, imageSourceType: e.target.value })}
-                      className="w-full p-2 bg-cream-100 border rounded"
+                      className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900 font-semibold"
                     >
                       <option value="OWNER_PHOTO">OWNER_PHOTO (Official)</option>
                       <option value="AI_ILLUSTRATIVE">AI_ILLUSTRATIVE (Temporary)</option>
@@ -1227,8 +1428,8 @@ export const AdminDashboard: React.FC = () => {
                 </div>
 
                 <div className="pt-3 flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowMenuModal(false)} className="px-4 py-2 rounded bg-cream-200 font-bold">Cancel</button>
-                  <button type="submit" className="px-4 py-2 rounded bg-forest-800 text-white font-bold">Save Item</button>
+                  <button type="button" onClick={() => setShowMenuModal(false)} className="px-4 py-2 rounded bg-cream-200 text-charcoal-800 font-bold">Cancel</button>
+                  <button type="submit" className="px-4 py-2 rounded bg-forest-800 text-white font-bold hover:bg-forest-700">Save Item</button>
                 </div>
               </form>
             </div>
@@ -1237,31 +1438,31 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Gallery Modal */}
         {showGalleryModal && (
-          <div className="fixed inset-0 z-50 bg-charcoal-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 bg-charcoal-950/80 backdrop-blur-xs flex items-center justify-center p-4">
             <div className="bg-cream-50 rounded-2xl p-6 max-w-md w-full border border-cream-300 shadow-2xl">
               <div className="flex items-center justify-between mb-4 border-b pb-2">
-                <h3 className="font-serif text-xl font-bold">Add Gallery Image</h3>
-                <button onClick={() => setShowGalleryModal(false)}><X className="w-5 h-5" /></button>
+                <h3 className="font-serif text-xl font-bold text-charcoal-900">Add Gallery Image</h3>
+                <button onClick={() => setShowGalleryModal(false)} className="text-charcoal-800/60 hover:text-charcoal-900"><X className="w-5 h-5" /></button>
               </div>
 
               <form onSubmit={handleSaveGalleryImage} className="space-y-3 font-sans text-xs">
                 <div>
-                  <label className="font-bold uppercase block mb-1">Title *</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Title *</label>
                   <input
                     type="text"
                     required
                     value={newGalleryImage.title}
                     onChange={(e) => setNewGalleryImage({ ...newGalleryImage, title: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                   />
                 </div>
 
                 <div>
-                  <label className="font-bold uppercase block mb-1">Category *</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Category *</label>
                   <select
                     value={newGalleryImage.category}
                     onChange={(e) => setNewGalleryImage({ ...newGalleryImage, category: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900 font-semibold"
                   >
                     <option value="Food">Food</option>
                     <option value="Ambience">Ambience</option>
@@ -1278,18 +1479,18 @@ export const AdminDashboard: React.FC = () => {
                 />
 
                 <div>
-                  <label className="font-bold uppercase block mb-1">Caption</label>
+                  <label className="font-bold uppercase block mb-1 text-charcoal-900">Caption</label>
                   <input
                     type="text"
                     value={newGalleryImage.caption}
                     onChange={(e) => setNewGalleryImage({ ...newGalleryImage, caption: e.target.value })}
-                    className="w-full p-2 bg-cream-100 border rounded"
+                    className="w-full p-2 bg-cream-100 border border-cream-300 rounded text-charcoal-900"
                   />
                 </div>
 
                 <div className="pt-3 flex justify-end gap-2">
-                  <button type="button" onClick={() => setShowGalleryModal(false)} className="px-4 py-2 rounded bg-cream-200 font-bold">Cancel</button>
-                  <button type="submit" className="px-4 py-2 rounded bg-forest-800 text-white font-bold">Add Photo</button>
+                  <button type="button" onClick={() => setShowGalleryModal(false)} className="px-4 py-2 rounded bg-cream-200 text-charcoal-800 font-bold">Cancel</button>
+                  <button type="submit" className="px-4 py-2 rounded bg-forest-800 text-white font-bold hover:bg-forest-700">Add Photo</button>
                 </div>
               </form>
             </div>
