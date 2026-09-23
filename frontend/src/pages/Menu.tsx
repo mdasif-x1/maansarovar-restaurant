@@ -18,7 +18,8 @@ export const Menu: React.FC = () => {
     <>
       <SEO
         title="Menu | The Maansarovar Restaurant & Food Court"
-        description="The Maansarovar Restaurant & Food Court menu details will be available soon."
+        description="The Maansarovar Restaurant & Food Court menu details will be available soon. Operating daily from 9:00 AM to 11:00 PM in Lakhimpur Kheri."
+        canonicalPath="/menu"
       />
 
       {/* Header Banner */}

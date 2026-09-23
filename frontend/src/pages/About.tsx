@@ -18,6 +18,7 @@ export const About: React.FC = () => {
       <SEO
         title={`About Us | ${brandName}`}
         description={`${brandName} is located beside Zila Panchayat Amrit Sarovar, Sitapur–Lakhimpur Road, Lakhimpur Kheri.`}
+        canonicalPath="/about"
       />
 
       {/* Header Banner */}

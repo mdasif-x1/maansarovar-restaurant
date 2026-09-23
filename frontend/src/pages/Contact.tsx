@@ -21,8 +21,9 @@ export const Contact: React.FC = () => {
   return (
     <>
       <SEO
-        title="Contact Us & Table Reservation | The Maansarovar Restaurant & Food Court"
+        title="Contact & Table Booking | The Maansarovar Restaurant & Food Court"
         description="Submit a table booking enquiry or get directions to The Maansarovar Restaurant & Food Court beside Amrit Sarovar, Lakhimpur Kheri."
+        canonicalPath="/contact"
       />
 
       {/* Header Banner */}

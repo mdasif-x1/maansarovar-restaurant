@@ -16,7 +16,8 @@ export const Gallery: React.FC = () => {
     <>
       <SEO
         title="Gallery | The Maansarovar Restaurant & Food Court"
-        description="Official photos of The Maansarovar Restaurant & Food Court will be available soon."
+        description="Official photos of The Maansarovar Restaurant & Food Court premises and food court in Lakhimpur Kheri."
+        canonicalPath="/gallery"
       />
 
       {/* Header Banner */}

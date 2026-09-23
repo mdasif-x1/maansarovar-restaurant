@@ -17,6 +17,7 @@ export const Home: React.FC = () => {
       <SEO
         title={`${titleText} | Lakhimpur Kheri`}
         description={`${titleText} located beside Zila Panchayat Amrit Sarovar, Sitapur–Lakhimpur Road, Lakhimpur Kheri. Open ${settings.opening_hours || '9:00 AM – 11:00 PM daily'}.`}
+        canonicalPath="/"
       />
 
       {/* Hero */}

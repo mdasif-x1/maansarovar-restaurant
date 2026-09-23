@@ -248,7 +248,7 @@ export const AdminDashboard: React.FC = () => {
 
   return (
     <>
-      <SEO title="Admin Control Dashboard | The Maansarovar Restaurant" />
+      <SEO title="Admin Control Dashboard | The Maansarovar Restaurant" noindex={true} />
 
       <div className="min-h-screen bg-cream-100 flex flex-col font-sans">
         

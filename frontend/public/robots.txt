@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 Disallow: /admin/
-Sitemap: https://themaansarovar.com/sitemap.xml
+Sitemap: https://maansarovar-restaurant.vercel.app/sitemap.xml

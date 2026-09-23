@@ -30,7 +30,7 @@ export const AdminLogin: React.FC = () => {
 
   return (
     <>
-      <SEO title="Admin Login | The Maansarovar Restaurant" />
+      <SEO title="Admin Login | The Maansarovar Restaurant" noindex={true} />
       
       <div className="min-h-[70vh] bg-cream-100 flex items-center justify-center py-14 px-4">
         <div className="max-w-md w-full bg-cream-50 rounded border border-cream-300/80 p-7 sm:p-8 shadow-subtle">
