@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { SettingsProvider, useSettings } from './context/SettingsContext';
 import { AnnouncementStrip } from './components/AnnouncementStrip';
@@ -14,6 +14,16 @@ import { Contact } from './pages/Contact';
 import { AdminLogin } from './pages/AdminLogin';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { NotFound } from './pages/NotFound';
+
+const ScrollToTop: React.FC = () => {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+};
 
 const ProtectedAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -75,6 +85,7 @@ export const App: React.FC = () => {
     <AuthProvider>
       <SettingsProvider>
         <BrowserRouter>
+          <ScrollToTop />
           <MainLayout />
         </BrowserRouter>
       </SettingsProvider>
@@ -83,3 +94,4 @@ export const App: React.FC = () => {
 };
 
 export default App;
+
