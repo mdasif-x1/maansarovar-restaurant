@@ -23,9 +23,19 @@ public class AuthController {
 
     @PostMapping("/login")
     @Operation(summary = "Admin login to obtain JWT token")
-    public ResponseEntity<ApiResponse<AuthResponse>> login(@Valid @RequestBody AuthRequest request) {
-        AuthResponse response = authService.authenticate(request);
+    public ResponseEntity<ApiResponse<AuthResponse>> login(@Valid @RequestBody AuthRequest request, jakarta.servlet.http.HttpServletRequest httpRequest) {
+        String clientIp = extractClientIp(httpRequest);
+        AuthResponse response = authService.authenticate(request, clientIp);
         return ResponseEntity.ok(ApiResponse.ok(response, "Login successful"));
+    }
+
+    @PostMapping("/logout")
+    @Operation(summary = "Revoke existing JWT tokens for current user")
+    public ResponseEntity<ApiResponse<Void>> logout(Authentication authentication) {
+        if (authentication != null && authentication.getName() != null) {
+            authService.revokeTokens(authentication.getName());
+        }
+        return ResponseEntity.ok(ApiResponse.ok(null, "Logged out successfully. Tokens invalidated."));
     }
 
     @GetMapping("/me")
@@ -33,5 +43,13 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> getCurrentUser(Authentication authentication) {
         AuthResponse response = authService.getCurrentUser(authentication.getName());
         return ResponseEntity.ok(ApiResponse.ok(response));
+    }
+
+    private String extractClientIp(jakarta.servlet.http.HttpServletRequest request) {
+        String xf = request.getHeader("X-Forwarded-For");
+        if (xf != null && !xf.isBlank()) {
+            return xf.split(",")[0].trim();
+        }
+        return request.getRemoteAddr() != null ? request.getRemoteAddr() : "unknown";
     }
 }

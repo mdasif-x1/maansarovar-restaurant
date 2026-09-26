@@ -43,14 +43,20 @@ public class SecurityBehaviorVerificationTest {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private LoginRateLimitService loginRateLimitService;
+
     @BeforeEach
     void setUp() {
+        loginRateLimitService.resetAttempts("127.0.0.1", "testadmin");
+        loginRateLimitService.resetAttempts("192.168.1.100", "testadmin");
         adminUserRepository.deleteAll();
         AdminUser admin = AdminUser.builder()
                 .username("testadmin")
                 .passwordHash(passwordEncoder.encode("Password123!"))
                 .email("testadmin@maansarovar.com")
                 .role("ROLE_ADMIN")
+                .tokenVersion(1)
                 .build();
         adminUserRepository.save(admin);
     }
@@ -67,6 +73,62 @@ public class SecurityBehaviorVerificationTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.message").value("Invalid username or password"));
+    }
+
+    @Test
+    void testLoginBruteForceRateLimiting_SixthAttemptReturns429() throws Exception {
+        AuthRequest request = new AuthRequest();
+        request.setUsername("testadmin");
+        request.setPassword("WrongPassword!");
+        String json = objectMapper.writeValueAsString(request);
+
+        // 5 consecutive failed attempts
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .header("X-Forwarded-For", "192.168.1.100")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(json))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        // 6th attempt should be blocked with 429
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-Forwarded-For", "192.168.1.100")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void testTokenRevocationOnLogout_InvalidatesToken() throws Exception {
+        // 1. Login to get token with tokenVersion 1
+        AuthRequest loginReq = new AuthRequest();
+        loginReq.setUsername("testadmin");
+        loginReq.setPassword("Password123!");
+
+        String loginResponse = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginReq)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        String token = objectMapper.readTree(loginResponse).path("data").path("token").asText();
+
+        // 2. Token works initially for protected endpoint
+        mockMvc.perform(get("/api/v1/admin/menu/items")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        // 3. User logs out (POST /api/v1/auth/logout with token)
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        // 4. Old token is now rejected with 403 because token_version was incremented
+        mockMvc.perform(get("/api/v1/admin/menu/items")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -109,20 +171,47 @@ public class SecurityBehaviorVerificationTest {
 
         String json = objectMapper.writeValueAsString(request);
 
-        // Requests 1, 2, 3 -> 201 CREATED
+        // Requests 1, 2, 3 with different times to test rate-limit without triggering duplicate check
         for (int i = 0; i < 3; i++) {
+            request.setReservationTime(LocalTime.of(18 + i, 0));
             mockMvc.perform(post("/api/v1/reservations")
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(json))
+                            .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isCreated());
         }
 
         // Request 4 -> 429 TOO_MANY_REQUESTS
+        request.setReservationTime(LocalTime.of(22, 0));
+        mockMvc.perform(post("/api/v1/reservations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.success").value(false));
+    }
+
+    @Test
+    void testReservationDuplicateDetection_RejectsDuplicateRequest() throws Exception {
+        ReservationRequest request = new ReservationRequest();
+        request.setGuestName("Test Guest");
+        request.setGuestPhone("9123456780");
+        request.setReservationDate(LocalDate.now().plusDays(2));
+        request.setReservationTime(LocalTime.of(20, 0));
+        request.setNumberOfGuests(4);
+
+        String json = objectMapper.writeValueAsString(request);
+
+        // First attempt succeeds
         mockMvc.perform(post("/api/v1/reservations")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json))
-                .andExpect(status().isTooManyRequests())
-                .andExpect(jsonPath("$.success").value(false));
+                .andExpect(status().isCreated());
+
+        // Exact duplicate attempt is rejected with 400
+        mockMvc.perform(post("/api/v1/reservations")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("A reservation request for this phone number, date, and time already exists."));
     }
 
     // 4. Upload Security Verification
