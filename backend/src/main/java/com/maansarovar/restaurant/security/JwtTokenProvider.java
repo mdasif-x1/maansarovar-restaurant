@@ -25,17 +25,22 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String generateToken(Authentication authentication) {
+    public String generateToken(Authentication authentication, Integer tokenVersion) {
         UserDetails userPrincipal = (UserDetails) authentication.getPrincipal();
         Date now = new Date();
         Date expiryDate = new Date(now.getTime() + jwtExpirationMs);
 
         return Jwts.builder()
                 .subject(userPrincipal.getUsername())
+                .claim("tokenVersion", tokenVersion != null ? tokenVersion : 1)
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(getSigningKey())
                 .compact();
+    }
+
+    public String generateToken(Authentication authentication) {
+        return generateToken(authentication, 1);
     }
 
     public String getUsernameFromJwt(String token) {
@@ -46,6 +51,24 @@ public class JwtTokenProvider {
                 .getPayload();
 
         return claims.getSubject();
+    }
+
+    public Integer getTokenVersionFromJwt(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+
+            Object version = claims.get("tokenVersion");
+            if (version instanceof Number) {
+                return ((Number) version).intValue();
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public boolean validateToken(String authToken) {

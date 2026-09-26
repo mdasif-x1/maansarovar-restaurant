@@ -29,4 +29,10 @@ public class CustomUserDetailsService implements UserDetailsService {
                 Collections.singletonList(new SimpleGrantedAuthority(user.getRole()))
         );
     }
+
+    public Integer getTokenVersion(String username) {
+        return userRepository.findByUsername(username)
+                .map(AdminUser::getTokenVersion)
+                .orElse(null);
+    }
 }

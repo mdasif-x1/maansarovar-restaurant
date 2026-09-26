@@ -30,6 +30,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String username = tokenProvider.getUsernameFromJwt(jwt);
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
+                // Token version check: reject revoked tokens
+                Integer tokenVersionInJwt = tokenProvider.getTokenVersionFromJwt(jwt);
+                if (userDetailsService instanceof CustomUserDetailsService) {
+                    Integer currentVersion = ((CustomUserDetailsService) userDetailsService).getTokenVersion(username);
+                    if (tokenVersionInJwt != null && currentVersion != null && !tokenVersionInJwt.equals(currentVersion)) {
+                        logger.warn("Rejected JWT token with outdated token version for user: " + username);
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+                }
+
                 UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                         userDetails, null, userDetails.getAuthorities());
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

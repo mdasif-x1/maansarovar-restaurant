@@ -31,6 +31,7 @@ public class MaansarovarApplication {
                         .passwordHash(passwordEncoder.encode(initialPassword))
                         .email(initialEmail)
                         .role("ROLE_ADMIN")
+                        .tokenVersion(1)
                         .build();
 
                 userRepository.save(admin);

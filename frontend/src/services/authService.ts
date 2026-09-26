@@ -17,8 +17,18 @@ export async function getCurrentUserAdmin(): Promise<AuthResponse> {
   return await fetchApi<AuthResponse>('/api/v1/auth/me');
 }
 
-export function logoutAdmin() {
-  localStorage.removeItem('maansarovar_jwt');
+export async function logoutAdmin(): Promise<void> {
+  try {
+    const token = localStorage.getItem('maansarovar_jwt');
+    if (token) {
+      await fetchApi<void>('/api/v1/auth/logout', { method: 'POST' });
+    }
+  } catch (err) {
+    // Non-blocking: ensure local session is always wiped even if network fails
+    console.warn('Server logout notification error:', err);
+  } finally {
+    localStorage.removeItem('maansarovar_jwt');
+  }
 }
 
 export function getToken(): string | null {

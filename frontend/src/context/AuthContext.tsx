@@ -7,7 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (u: string, p: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void> | void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,8 +33,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(res);
   };
 
-  const logout = () => {
-    logoutAdmin();
+  const logout = async () => {
+    await logoutAdmin();
     setUser(null);
   };
 

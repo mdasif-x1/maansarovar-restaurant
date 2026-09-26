@@ -30,6 +30,10 @@ public class AdminUser {
     @Builder.Default
     private String role = "ROLE_ADMIN";
 
+    @Column(name = "token_version", nullable = false)
+    @Builder.Default
+    private Integer tokenVersion = 1;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
