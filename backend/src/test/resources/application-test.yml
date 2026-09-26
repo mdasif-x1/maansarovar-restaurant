@@ -12,7 +12,7 @@ spring:
     enabled: false
 
 jwt:
-  secret: test_jwt_secret_key_for_unit_tests_only_32_bytes_long!!
+  secret: dGVzdF9qd3Rfc2VjcmV0X2tleV9mb3JfdW5pdF90ZXN0c19vbmx5XzMyX2J5dGVzX2xvbmchIQ==
   expiration-ms: 86400000
 
 app:

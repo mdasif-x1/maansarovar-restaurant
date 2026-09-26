@@ -6,6 +6,7 @@ import com.maansarovar.restaurant.entity.AdminUser;
 import com.maansarovar.restaurant.exception.ResourceNotFoundException;
 import com.maansarovar.restaurant.repository.AdminUserRepository;
 import com.maansarovar.restaurant.security.JwtTokenProvider;
+import com.maansarovar.restaurant.security.LoginRateLimitService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
