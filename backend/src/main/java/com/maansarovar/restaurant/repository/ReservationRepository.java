@@ -15,4 +15,6 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
     Page<Reservation> findAllByOrderByCreatedAtDesc(Pageable pageable);
     Page<Reservation> findByStatusOrderByCreatedAtDesc(String status, Pageable pageable);
     long countByGuestPhoneAndCreatedAtAfter(String guestPhone, LocalDateTime afterTime);
+    boolean existsByGuestPhoneAndReservationDateAndReservationTimeAndStatusNot(
+            String guestPhone, LocalDate reservationDate, java.time.LocalTime reservationTime, String excludedStatus);
 }

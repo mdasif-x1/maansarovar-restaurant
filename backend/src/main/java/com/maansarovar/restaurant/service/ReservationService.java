@@ -41,9 +41,16 @@ public class ReservationService {
             throw new BadRequestException("Reservations are only accepted during operating hours (9:00 AM – 11:00 PM).");
         }
 
+        // Duplicate booking check: prevent double-clicks/identical requests for same phone, date and time
+        boolean duplicateExists = reservationRepository.existsByGuestPhoneAndReservationDateAndReservationTimeAndStatusNot(
+                request.getGuestPhone().trim(), request.getReservationDate(), request.getReservationTime(), "CLOSED");
+        if (duplicateExists) {
+            throw new BadRequestException("A reservation request for this phone number, date, and time already exists.");
+        }
+
         // Rate-limiting / anti-spam check: max 3 requests per phone per hour
         LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
-        long recentBookingsCount = reservationRepository.countByGuestPhoneAndCreatedAtAfter(request.getGuestPhone(), oneHourAgo);
+        long recentBookingsCount = reservationRepository.countByGuestPhoneAndCreatedAtAfter(request.getGuestPhone().trim(), oneHourAgo);
 
         if (recentBookingsCount >= 3) {
             throw new com.maansarovar.restaurant.exception.TooManyRequestsException("Multiple reservation requests detected for this phone number. Please call the restaurant directly for urgent assistance.");
